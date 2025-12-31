@@ -21,6 +21,12 @@ This document describes all available configuration options for the REST API tes
 - Values: Set to `false` to disable SSL verification for self-signed certificates
 - Usage: Disable when testing APIs with self-signed certificates in development environments
 
+### REST_TIMEOUT (Optional)
+- Description: Request timeout in milliseconds
+- Default: 30000 (30 seconds)
+- Example: `60000` for 60 second timeout
+- Usage: Prevents requests from hanging indefinitely
+
 ## Custom Headers Configuration
 
 ### Custom Headers (Optional)
@@ -40,17 +46,17 @@ This document describes all available configuration options for the REST API tes
 The tool supports three authentication methods. Configure one based on your API's requirements.
 
 ### Basic Authentication
-- REST_BASIC_USERNAME: Username for Basic Auth
-- REST_BASIC_PASSWORD: Password for Basic Auth
+- AUTH_BASIC_USERNAME: Username for Basic Auth
+- AUTH_BASIC_PASSWORD: Password for Basic Auth
 - Usage: When both are set, requests will include Basic Auth header
 
 ### Bearer Token
-- REST_BEARER: Bearer token value
+- AUTH_BEARER: Bearer token value
 - Usage: When set, requests will include `Authorization: Bearer <token>` header
 
 ### API Key
-- REST_APIKEY_HEADER_NAME: Name of the header for API key
-- REST_APIKEY_VALUE: Value of the API key
+- AUTH_APIKEY_HEADER_NAME: Name of the header for API key
+- AUTH_APIKEY_VALUE: Value of the API key
 - Example:
   ```
   REST_APIKEY_HEADER_NAME=X-API-Key

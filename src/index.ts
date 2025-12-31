@@ -24,6 +24,16 @@ const RESPONSE_SIZE_LIMIT = process.env.REST_RESPONSE_SIZE_LIMIT
 if (isNaN(RESPONSE_SIZE_LIMIT) || RESPONSE_SIZE_LIMIT <= 0) {
   throw new Error('REST_RESPONSE_SIZE_LIMIT must be a positive number');
 }
+
+// Default request timeout: 30 seconds
+const REST_TIMEOUT = process.env.REST_TIMEOUT
+  ? parseInt(process.env.REST_TIMEOUT, 10)
+  : 30000;
+
+if (isNaN(REST_TIMEOUT) || REST_TIMEOUT <= 0) {
+  throw new Error('REST_TIMEOUT must be a positive number');
+}
+
 const AUTH_BASIC_USERNAME = process.env.AUTH_BASIC_USERNAME;
 const AUTH_BASIC_PASSWORD = process.env.AUTH_BASIC_PASSWORD;
 const AUTH_BEARER = process.env.AUTH_BEARER;
@@ -31,10 +41,27 @@ const AUTH_APIKEY_HEADER_NAME = process.env.AUTH_APIKEY_HEADER_NAME;
 const AUTH_APIKEY_VALUE = process.env.AUTH_APIKEY_VALUE;
 const REST_ENABLE_SSL_VERIFY = process.env.REST_ENABLE_SSL_VERIFY !== 'false';
 
+// Type for request/response body (JSON-serializable values)
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type RequestBody = JsonValue | undefined;
+
+// Headers that are safe to display values for (non-sensitive)
+const SAFE_HEADERS = new Set([
+  'accept',
+  'accept-language',
+  'content-type',
+  'user-agent',
+  'cache-control',
+  'if-match',
+  'if-none-match',
+  'if-modified-since',
+  'if-unmodified-since',
+]);
+
 interface EndpointArgs {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   endpoint: string;
-  body?: any;
+  body?: RequestBody;
   headers?: Record<string, string>;
   host?: string;
 }
@@ -52,21 +79,17 @@ interface ValidationResult {
 
 // Function to sanitize headers by removing sensitive values and non-approved headers
 const sanitizeHeaders = (
-  headers: Record<string, any>,
+  headers: Record<string, string | undefined>,
   isFromOptionalParams: boolean = false
-): Record<string, any> => {
-  const sanitized: Record<string, any> = {};
+): Record<string, string> => {
+  const sanitized: Record<string, string> = {};
   
   for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    
     const lowerKey = key.toLowerCase();
     
-    // Always include headers from optional parameters
-    if (isFromOptionalParams) {
-      sanitized[key] = value;
-      continue;
-    }
-    
-    // Handle authentication headers
+    // Always redact auth headers, even from optional parameters
     if (
       lowerKey === 'authorization' ||
       (AUTH_APIKEY_HEADER_NAME && lowerKey === AUTH_APIKEY_HEADER_NAME.toLowerCase())
@@ -75,23 +98,17 @@ const sanitizeHeaders = (
       continue;
     }
     
+    // Include headers from optional parameters (non-auth)
+    if (isFromOptionalParams) {
+      sanitized[key] = value;
+      continue;
+    }
+    
     // For headers from config/env
     const customHeaders = getCustomHeaders();
     if (key in customHeaders) {
       // Show value only for headers that are in the approved list
-      const safeHeaders = new Set([
-        'accept',
-        'accept-language',
-        'content-type',
-        'user-agent',
-        'cache-control',
-        'if-match',
-        'if-none-match',
-        'if-modified-since',
-        'if-unmodified-since'
-      ]);
-      const lowerKey = key.toLowerCase();
-      sanitized[key] = safeHeaders.has(lowerKey) ? value : '[REDACTED]';
+      sanitized[key] = SAFE_HEADERS.has(lowerKey) ? value : '[REDACTED]';
     }
   }
   
@@ -102,54 +119,53 @@ interface ResponseObject {
   request: {
     url: string;
     method: string;
-    headers: Record<string, string | undefined>;
-    body: any;
+    headers: Record<string, string>;
+    body: RequestBody;
     authMethod: string;
   };
   response: {
     statusCode: number;
     statusText: string;
     timing: string;
-    headers: Record<string, any>;
-    body: any;
+    headers: Record<string, string>;
+    body: JsonValue;
   };
   validation: ValidationResult;
 }
 
 const normalizeBaseUrl = (url: string): string => url.replace(/\/+$/, '');
 
-const isValidEndpointArgs = (args: any): args is EndpointArgs => {
+const isValidEndpointArgs = (args: unknown): args is EndpointArgs => {
   if (typeof args !== 'object' || args === null) return false;
-  if (!['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(args.method)) return false;
-  if (typeof args.endpoint !== 'string') return false;
-  if (args.headers !== undefined && (typeof args.headers !== 'object' || args.headers === null)) return false;
+  const a = args as Record<string, unknown>;
+  if (!['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(a.method as string)) return false;
+  if (typeof a.endpoint !== 'string') return false;
+  if (a.headers !== undefined && (typeof a.headers !== 'object' || a.headers === null)) return false;
   
   // Check if endpoint contains a full URL
   const urlPattern = /^(https?:\/\/|www\.)/i;
-  if (urlPattern.test(args.endpoint)) {
+  if (urlPattern.test(a.endpoint)) {
     throw new McpError(
       ErrorCode.InvalidParams,
-      `Invalid endpoint format. Do not include full URLs. Instead of "${args.endpoint}", use just the path (e.g. "/api/users"). ` +
-      `Your path will be resolved to: ${process.env.REST_BASE_URL}${args.endpoint.replace(/^\/+|\/+$/g, '')}. ` +
+      `Invalid endpoint format. Do not include full URLs. Instead of "${a.endpoint}", use just the path (e.g. "/api/users"). ` +
+      `Your path will be resolved to: ${process.env.REST_BASE_URL}${(a.endpoint).replace(/^\/+|\/+$/g, '')}. ` +
       `To test a different base URL, update the REST_BASE_URL environment variable.`
     );
   }
   // Validate .host if present
-  if (args.host !== undefined) {
+  if (a.host !== undefined) {
     try {
-      const url = new URL(args.host);
+      const url = new URL(a.host as string);
       if (!/^https?:$/.test(url.protocol)) {
         throw new Error();
       }
       // Remove trailing slash if present
-      if (url.pathname.endsWith('/') && url.pathname !== '/') {
-        url.pathname = url.pathname.replace(/\/+$/, '');
-        args.host = url.origin + url.pathname;
-      } else {
-        args.host = url.origin + url.pathname;
-      }
+      const normalizedHost = url.pathname.endsWith('/') && url.pathname !== '/'
+        ? url.origin + url.pathname.replace(/\/+$/, '')
+        : url.origin + url.pathname;
+      (args as { host: string }).host = normalizedHost;
     } catch (e) {
-      throw new McpError(ErrorCode.InvalidParams, `Invalid host format. The 'host' argument must be a valid URL starting with http:// or https://, e.g. "https://example.com" or "http://localhost:3001/api/v1". Received: "${args.host}"`);
+      throw new McpError(ErrorCode.InvalidParams, `Invalid host format. The 'host' argument must be a valid URL starting with http:// or https://, e.g. "https://example.com" or "http://localhost:3001/api/v1". Received: "${a.host}"`);
     }
   }
   
@@ -159,6 +175,59 @@ const isValidEndpointArgs = (args: any): args is EndpointArgs => {
 const hasBasicAuth = () => AUTH_BASIC_USERNAME && AUTH_BASIC_PASSWORD;
 const hasBearerAuth = () => !!AUTH_BEARER;
 const hasApiKeyAuth = () => AUTH_APIKEY_HEADER_NAME && AUTH_APIKEY_VALUE;
+
+/**
+ * Generate the tool description for test_request
+ */
+function getToolDescription(): string {
+  const baseUrl = normalizeBaseUrl(process.env.REST_BASE_URL!);
+  const sslStatus = REST_ENABLE_SSL_VERIFY ? 'enabled' : 'disabled';
+  
+  // Authentication status
+  let authStatus: string;
+  if (hasBasicAuth()) {
+    authStatus = `Basic Auth with username: ${AUTH_BASIC_USERNAME}`;
+  } else if (hasBearerAuth()) {
+    authStatus = 'Bearer token authentication configured';
+  } else if (hasApiKeyAuth()) {
+    authStatus = `API Key using header: ${AUTH_APIKEY_HEADER_NAME}`;
+  } else {
+    authStatus = 'No authentication configured';
+  }
+  
+  // Custom headers status
+  const customHeaders = getCustomHeaders();
+  let headersStatus: string;
+  if (Object.keys(customHeaders).length === 0) {
+    headersStatus = 'No custom headers defined (see config resource for headers)';
+  } else {
+    const headerList = Object.entries(customHeaders)
+      .map(([name, value]) => {
+        const lowerName = name.toLowerCase();
+        return SAFE_HEADERS.has(lowerName) ? `${name}(${value})` : name;
+      })
+      .join(', ');
+    headersStatus = `Custom headers defined: ${headerList} (see config resource for headers)`;
+  }
+  
+  return [
+    `Test a REST API endpoint and get detailed response information.`,
+    `Base URL: ${baseUrl}`,
+    `SSL Verification ${sslStatus} (see config resource for SSL settings)`,
+    `Authentication: ${authStatus}`,
+    headersStatus,
+    `The tool automatically:`,
+    `- Normalizes endpoints (adds leading slash, removes trailing slashes)`,
+    `- Handles authentication header injection`,
+    `- Applies custom headers from HEADER_* environment variables`,
+    `- Accepts any HTTP status code as valid`,
+    `- Limits response size to ${RESPONSE_SIZE_LIMIT} bytes (see config resource for size limit settings)`,
+    `- Request timeout: ${REST_TIMEOUT}ms`,
+    `- Returns detailed response information including: Full URL, status, headers, body, timing, validation`,
+    `Error Handling: Network errors are caught and returned with descriptive messages`,
+    `See the config resource for all configuration options.`,
+  ].join(' | ');
+}
 
 // Collect custom headers from environment variables
 const getCustomHeaders = (): Record<string, string> => {
@@ -180,10 +249,6 @@ class RestTester {
   private server!: Server;
   private axiosInstance!: AxiosInstance;
 
-  constructor() {
-    this.setupServer();
-  }
-
   private async setupServer() {
     this.server = new Server(
       {
@@ -198,9 +263,12 @@ class RestTester {
       }
     );
 
-    const https = await import('https');
+    const https = await import('https').catch(() => {
+      throw new Error('Failed to import https module');
+    });
     this.axiosInstance = axios.create({
       baseURL: normalizeBaseUrl(process.env.REST_BASE_URL!),
+      timeout: REST_TIMEOUT,
       validateStatus: () => true, // Allow any status code
       httpsAgent: REST_ENABLE_SSL_VERIFY ? undefined : new https.Agent({ // Disable SSL verification only when explicitly set to false
         rejectUnauthorized: false
@@ -253,11 +321,14 @@ class RestTester {
       }
 
       const resource = match[1];
-      const fs = await import('fs');
-      const path = await import('path');
 
       try {
-        const url = await import('url');
+        const [fs, path, url] = await Promise.all([
+          import('fs'),
+          import('path'),
+          import('url'),
+        ]);
+        
         const __filename = url.fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
         
@@ -287,43 +358,7 @@ class RestTester {
       tools: [
         {
           name: 'test_request',
-          description: `Test a REST API endpoint and get detailed response information. Base URL: ${normalizeBaseUrl(process.env.REST_BASE_URL!)} | SSL Verification ${REST_ENABLE_SSL_VERIFY ? 'enabled' : 'disabled'} (see config resource for SSL settings) | Authentication: ${
-  hasBasicAuth() ? 
-    `Basic Auth with username: ${AUTH_BASIC_USERNAME}` :
-  hasBearerAuth() ? 
-    'Bearer token authentication configured' :
-  hasApiKeyAuth() ? 
-    `API Key using header: ${AUTH_APIKEY_HEADER_NAME}` :
-    'No authentication configured'
-} | ${(() => {
-  const customHeaders = getCustomHeaders();
-  if (Object.keys(customHeaders).length === 0) {
-    return 'No custom headers defined (see config resource for headers)';
-  }
-  
-  // List of common headers that are safe to show values for
-  const safeHeaders = new Set([
-    'accept',
-    'accept-language',
-    'content-type',
-    'user-agent',
-    'cache-control',
-    'if-match',
-    'if-none-match',
-    'if-modified-since',
-    'if-unmodified-since'
-  ]);
-  
-  const headerList = Object.entries(customHeaders).map(([name, value]) => {
-    const lowerName = name.toLowerCase();
-    return safeHeaders.has(lowerName) ? 
-      `${name}(${value})` : 
-      name;
-  }).join(', ');
-  
-  return `Custom headers defined: ${headerList} (see config resource for headers)`;
-})()} | The tool automatically: - Normalizes endpoints (adds leading slash, removes trailing slashes) - Handles authentication header injection - Applies custom headers from HEADER_* environment variables - Accepts any HTTP status code as valid - Limits response size to ${RESPONSE_SIZE_LIMIT} bytes (see config resource for size limit settings) - Returns detailed response information including: * Full URL called * Status code and text * Response headers * Response body * Request details (method, headers, body) * Response timing * Validation messages | Error Handling: - Network errors are caught and returned with descriptive messages - Invalid status codes are still returned with full response details - Authentication errors include the attempted auth method | See the config resource for all configuration options, including header configuration.
-`,
+          description: getToolDescription(),
           inputSchema: {
             type: 'object',
             properties: {
@@ -346,6 +381,10 @@ class RestTester {
                 additionalProperties: {
                   type: 'string'
                 }
+              },
+              host: {
+                type: 'string',
+                description: `Optional override for the base URL. Must be a valid URL starting with http:// or https://. Example: "https://api.example.com/v1" with endpoint "/users" resolves to "https://api.example.com/v1/users"`,
               }
             },
             required: ['method', 'endpoint'],

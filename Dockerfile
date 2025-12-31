@@ -24,8 +24,9 @@ FROM node:18-alpine AS release
 WORKDIR /app
 
 # Copy built files and necessary package information
-COPY --from=builder /app/build /app/build
-COPY --from=builder /app/package.json /app/package-lock.json /app/node_modules ./ 
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/package.json /app/package-lock.json ./
+COPY --from=builder /app/node_modules ./node_modules
 
 # Environment configuration for runtime (configured externally)
 ENV REST_BASE_URL=""
