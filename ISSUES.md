@@ -18,41 +18,41 @@ Derived from [PRD.md](PRD.md).
 
 ---
 
-## M0 — Skeleton
+## M0 — Skeleton ✅
 
 > Goal: working MCP server that reads a TOML config and calls a REST API.
 
-- [ ] **M0-01** · Project scaffolding (`go mod init`, directory layout, Makefile, `.goreleaser.yml`) `P0`
-- [ ] **M0-02** · Config loader — read TOML file, env vars, CLI flags; priority merge `P0`
-- [ ] **M0-03** · `${ENV_VAR}` interpolation in config string values `P0`
-- [ ] **M0-04** · Manual endpoint parser — `[[endpoints]]` → `[]Operation` internal model `P0`
-- [ ] **M0-05** · Tool generator — `[]Operation` → MCP `tools/list` response with JSON Schema `P0`
-- [ ] **M0-06** · Request executor — build HTTP request from tool call args (path, query, body, headers) `P0`
-- [ ] **M0-07** · Static header injection from `[headers]` config `P0`
-- [ ] **M0-08** · MCP stdio transport — JSON-RPC over stdin/stdout (`initialize`, `tools/list`, `tools/call`) `P0`
-- [ ] **M0-09** · Response formatting — return JSON body + status code; `isError` for 4xx/5xx `P0`
-- [ ] **M0-10** · Structured JSON logging to stderr with `LOG_LEVEL` control `P0`
-- [ ] **M0-11** · Basic end-to-end test: TOML config → tool list → tool call → HTTP mock `P0`
+- [x] **M0-01** · Project scaffolding (`go mod init`, directory layout, Makefile, `.goreleaser.yml`) `P0`
+- [x] **M0-02** · Config loader — read TOML file, env vars, CLI flags; priority merge `P0`
+- [x] **M0-03** · `${ENV_VAR}` interpolation in config string values `P0`
+- [x] **M0-04** · Manual endpoint parser — `[[endpoints]]` → `[]Operation` internal model `P0`
+- [x] **M0-05** · Tool generator — `[]Operation` → MCP `tools/list` response with JSON Schema `P0`
+- [x] **M0-06** · Request executor — build HTTP request from tool call args (path, query, body, headers) `P0`
+- [x] **M0-07** · Static header injection from `[headers]` config `P0`
+- [x] **M0-08** · MCP stdio transport — JSON-RPC over stdin/stdout (`initialize`, `tools/list`, `tools/call`) `P0`
+- [x] **M0-09** · Response formatting — return JSON body + status code; `isError` for 4xx/5xx `P0`
+- [x] **M0-10** · Structured JSON logging to stderr with `LOG_LEVEL` control `P0`
+- [x] **M0-11** · Basic end-to-end test: TOML config → tool list → tool call → HTTP mock `P0`
 
 ---
 
-## M1 — OpenAPI
+## M1 — OpenAPI ✅
 
 > Goal: point at an OpenAPI spec, auto-generate all tools.
 
-- [ ] **M1-01** · OpenAPI 3.0 parser — load JSON/YAML from file path `P0`
-- [ ] **M1-02** · OpenAPI 3.1 parser (handle differences from 3.0) `P0`
-- [ ] **M1-03** · Remote spec loading — fetch spec from URL `P0`
-- [ ] **M1-04** · Operation extraction — iterate paths × methods → `[]Operation` `P0`
-- [ ] **M1-05** · Tool naming — `operationId` → tool name; fallback `method_path` snake_case `P0`
-- [ ] **M1-06** · Path parameter mapping → required tool arguments `P0`
-- [ ] **M1-07** · Query parameter mapping → optional tool arguments with defaults `P0`
-- [ ] **M1-08** · Request body schema → tool arguments (flatten top-level properties) `P0`
-- [ ] **M1-09** · `enum` constraints on arguments `P0`
-- [ ] **M1-10** · `description` / `summary` → tool description `P0`
-- [ ] **M1-11** · `--dry-run` mode: print generated tools as JSON and exit `P1`
-- [ ] **M1-12** · Handle `$ref` resolution (inline + external file refs) `P0`
-- [ ] **M1-13** · Integration test: Petstore spec → tool list → call mock `P0`
+- [x] **M1-01** · OpenAPI 3.0 parser — load JSON/YAML from file path `P0`
+- [x] **M1-02** · OpenAPI 3.1 parser (handle differences from 3.0) `P0`
+- [x] **M1-03** · Remote spec loading — fetch spec from URL `P0`
+- [x] **M1-04** · Operation extraction — iterate paths × methods → `[]Operation` `P0`
+- [x] **M1-05** · Tool naming — `operationId` → tool name; fallback `method_path` snake_case `P0`
+- [x] **M1-06** · Path parameter mapping → required tool arguments `P0`
+- [x] **M1-07** · Query parameter mapping → optional tool arguments with defaults `P0`
+- [x] **M1-08** · Request body schema → tool arguments (flatten top-level properties) `P0`
+- [x] **M1-09** · `enum` constraints on arguments `P0`
+- [x] **M1-10** · `description` / `summary` → tool description `P0`
+- [x] **M1-11** · `--dry-run` mode: print generated tools as JSON and exit `P1`
+- [x] **M1-12** · Handle `$ref` resolution (inline + external file refs) `P0`
+- [x] **M1-13** · Integration test: Petstore spec → tool list → call mock `P0`
 
 ---
 
@@ -60,15 +60,15 @@ Derived from [PRD.md](PRD.md).
 
 > Goal: reliable in real-world usage with messy specs and large APIs.
 
-- [ ] **M2-01** · Include/exclude filters: `include_tags`, `exclude_paths`, `include_operations`, `exclude_operations` `P1`
-- [ ] **M2-02** · Response truncation — configurable `MAX_RESPONSE_SIZE` (default 100KB) `P0`
-- [ ] **M2-03** · Request timeout — configurable `REQUEST_TIMEOUT` (default 30s) `P0`
+- [x] **M2-01** · Include/exclude filters: `include_tags`, `exclude_paths`, `include_operations`, `exclude_operations` `P1`
+- [x] **M2-02** · Response truncation — configurable `MAX_RESPONSE_SIZE` (default 100KB) `P0`
+- [x] **M2-03** · Request timeout — configurable `REQUEST_TIMEOUT` (default 30s) `P0`
 - [ ] **M2-04** · Graceful error handling — network errors, DNS failures, TLS errors → clear MCP error `P0`
-- [ ] **M2-05** · Raw JSON body pass-through for complex/nested schemas `P1`
-- [ ] **M2-06** · Debug logging — log every outbound HTTP request (method, path, status, latency) `P0`
+- [x] **M2-05** · Raw JSON body pass-through for complex/nested schemas `P1`
+- [x] **M2-06** · Debug logging — log every outbound HTTP request (method, path, status, latency) `P0`
 - [ ] **M2-07** · Handle specs with 500+ operations efficiently (lazy generation, memory) `P1`
-- [ ] **M2-08** · Validate BASE_URL format at startup `P0`
-- [ ] **M2-09** · Handle spec with no `operationId` on any operation (generate all names) `P0`
+- [x] **M2-08** · Validate BASE_URL format at startup `P0`
+- [x] **M2-09** · Handle spec with no `operationId` on any operation (generate all names) `P0`
 - [ ] **M2-10** · Tool name collision detection and deterministic disambiguation `P1`
 
 ---
@@ -119,4 +119,4 @@ Derived from [PRD.md](PRD.md).
 
 ## Bugs
 
-_None yet — project hasn't started._
+_None reported._

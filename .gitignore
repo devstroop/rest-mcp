@@ -1,6 +1,8 @@
 # Binary
 rest-mcp.exe
 rest-mcp
+!cmd/rest-mcp/
+
 
 # Build output
 dist/

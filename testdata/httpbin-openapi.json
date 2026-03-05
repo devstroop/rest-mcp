@@ -1,0 +1,188 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HTTPBin Test API",
+    "description": "Test subset of httpbin.org for integration testing",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/get": {
+      "get": {
+        "operationId": "httpbin_get",
+        "summary": "Returns GET request data",
+        "description": "Returns the GET request data including headers and query parameters.",
+        "parameters": [
+          {
+            "name": "foo",
+            "in": "query",
+            "description": "A test query parameter",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "bar"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Response format",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["json", "html", "xml"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/post": {
+      "post": {
+        "operationId": "httpbin_post",
+        "summary": "Returns POST request data",
+        "description": "Returns the POST request data including the body.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "User name"
+                  },
+                  "age": {
+                    "type": "integer",
+                    "description": "User age"
+                  },
+                  "active": {
+                    "type": "boolean",
+                    "description": "Is user active"
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/status/{code}": {
+      "get": {
+        "operationId": "httpbin_status",
+        "summary": "Returns given HTTP status code",
+        "description": "Returns a response with the specified HTTP status code.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "description": "HTTP status code to return",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status response"
+          }
+        }
+      }
+    },
+    "/anything/{path}": {
+      "get": {
+        "operationId": "httpbin_anything",
+        "summary": "Returns anything passed in request",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      },
+      "post": {
+        "operationId": "httpbin_anything_post",
+        "summary": "Returns anything passed in POST request",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/delay/{seconds}": {
+      "get": {
+        "operationId": "httpbin_delay",
+        "summary": "Delays responding for n seconds",
+        "tags": ["timing"],
+        "parameters": [
+          {
+            "name": "seconds",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delayed response"
+          }
+        }
+      }
+    }
+  }
+}
