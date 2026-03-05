@@ -58,4 +58,8 @@ type Param struct {
 
 	// Enum lists allowed values.
 	Enum []string
+
+	// ItemsType is the JSON Schema type of array elements (only used when Type == "array").
+	// Defaults to "string" if empty.
+	ItemsType string
 }

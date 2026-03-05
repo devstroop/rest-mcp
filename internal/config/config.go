@@ -196,6 +196,20 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("EXCLUDE_PATHS"); v != "" {
 		cfg.Filters.ExcludePaths = splitCSV(v)
 	}
+
+	// HEADER_* env vars → injected as HTTP headers.
+	// e.g. HEADER_Authorization="Bearer xxx" → Authorization: Bearer xxx
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "HEADER_") {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) == 2 {
+				headerName := strings.TrimPrefix(parts[0], "HEADER_")
+				if headerName != "" {
+					cfg.Headers[headerName] = parts[1]
+				}
+			}
+		}
+	}
 }
 
 // applyCLI overrides config with CLI flag values.

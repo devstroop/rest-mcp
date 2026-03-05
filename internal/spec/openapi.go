@@ -349,6 +349,11 @@ func convertParameter(param *openapi3.Parameter) model.Param {
 		}
 
 		mp.Enum = extractEnum(schema)
+
+		// Capture array items type
+		if mp.Type == "array" && schema.Items != nil && schema.Items.Value != nil {
+			mp.ItemsType = schemaType(schema.Items.Value)
+		}
 	}
 
 	return mp
@@ -414,16 +419,26 @@ func extractBodyParams(body *openapi3.RequestBody) []model.Param {
 			}
 
 			mp.Enum = extractEnum(prop)
+
+			// Capture array items type
+			if mp.Type == "array" && prop.Items != nil && prop.Items.Value != nil {
+				mp.ItemsType = schemaType(prop.Items.Value)
+			}
+
 			params = append(params, mp)
 		}
 	} else if schema.Type != nil && schema.Type.Is("array") {
 		// If body is an array, expose a single "body" param
-		params = append(params, model.Param{
+		p := model.Param{
 			Name:        "body",
 			Type:        "array",
 			Description: schema.Description,
 			Required:    body.Required,
-		})
+		}
+		if schema.Items != nil && schema.Items.Value != nil {
+			p.ItemsType = schemaType(schema.Items.Value)
+		}
+		params = append(params, p)
 	} else {
 		// For non-object bodies (primitives, or no type), expose a single "body" param
 		params = append(params, model.Param{

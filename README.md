@@ -42,10 +42,8 @@ Add to your Claude Desktop / VS Code / agent config:
       "command": "rest-mcp",
       "env": {
         "BASE_URL": "https://api.example.com",
-        "OPENAPI_SPEC": "./openapi.json"
-      },
-      "headers": {
-        "Authorization": "Bearer your-token-here"
+        "OPENAPI_SPEC": "./openapi.json",
+        "HEADER_Authorization": "Bearer your-token-here"
       }
     }
   }
@@ -98,10 +96,8 @@ If your API has an OpenAPI/Swagger spec, just point to it:
       "command": "rest-mcp",
       "env": {
         "BASE_URL": "https://api.example.com",
-        "OPENAPI_SPEC": "./openapi.json"
-      },
-      "headers": {
-        "Authorization": "Bearer ${API_KEY}"
+        "OPENAPI_SPEC": "./openapi.json",
+        "HEADER_Authorization": "Bearer ${API_KEY}"
       }
     }
   }
@@ -200,6 +196,7 @@ Load the spec directly from a URL:
 | `DRY_RUN` | Print generated tools and exit | `false` |
 | `TRANSPORT` | Transport mode: `stdio`, `sse`, `streamable-http` | `stdio` |
 | `LISTEN_ADDR` | Listen address for SSE/HTTP transport | `:8080` |
+| `HEADER_*` | Inject HTTP headers (e.g. `HEADER_Authorization=Bearer xxx`) | — |
 
 ---
 
@@ -251,12 +248,10 @@ rest-mcp --config ./my-api.toml
       "env": {
         "BASE_URL": "https://api.github.com",
         "OPENAPI_SPEC": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
-        "INCLUDE_TAGS": "repos,issues,pulls"
-      },
-      "headers": {
-        "Authorization": "Bearer ghp_xxxxxxxxxxxx",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28"
+        "INCLUDE_TAGS": "repos,issues,pulls",
+        "HEADER_Authorization": "Bearer ghp_xxxxxxxxxxxx",
+        "HEADER_Accept": "application/vnd.github+json",
+        "HEADER_X-GitHub-Api-Version": "2022-11-28"
       }
     }
   }
@@ -273,10 +268,8 @@ rest-mcp --config ./my-api.toml
       "env": {
         "BASE_URL": "https://api.stripe.com/v1",
         "OPENAPI_SPEC": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
-        "INCLUDE_TAGS": "customers,charges,invoices"
-      },
-      "headers": {
-        "Authorization": "Bearer sk_test_xxxxxxxxxxxx"
+        "INCLUDE_TAGS": "customers,charges,invoices",
+        "HEADER_Authorization": "Bearer sk_test_xxxxxxxxxxxx"
       }
     }
   }
@@ -305,18 +298,26 @@ rest-mcp --config ./my-api.toml
 
 | Method | Config |
 |--------|--------|
-| **Bearer token** | `headers: { "Authorization": "Bearer xxx" }` |
-| **API key header** | `headers: { "X-API-Key": "xxx" }` |
+| **Bearer token** | `HEADER_Authorization=Bearer xxx` env var |
+| **API key header** | `HEADER_X-API-Key=xxx` env var |
 | **API key in query** | `auth.type = "apikey_query"` in TOML |
 | **Basic auth** | `auth.type = "basic"` in TOML |
 | **OAuth2 client credentials** | `auth.type = "oauth2_cc"` in TOML |
 
-Use `${ENV_VAR}` in any header value or config string to reference environment variables:
+Headers can be injected via `HEADER_*` environment variables or the TOML `[headers]` section:
 
 ```json
-"headers": {
-  "Authorization": "Bearer ${MY_API_TOKEN}"
+"env": {
+  "HEADER_Authorization": "Bearer ${MY_API_TOKEN}",
+  "HEADER_Accept": "application/json"
 }
+```
+
+In TOML, use `${ENV_VAR}` interpolation for secrets:
+
+```toml
+[headers]
+Authorization = "Bearer ${MY_API_TOKEN}"
 ```
 
 ---

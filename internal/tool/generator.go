@@ -106,5 +106,13 @@ func paramToSchema(p model.Param) map[string]interface{} {
 	if len(p.Enum) > 0 {
 		s["enum"] = p.Enum
 	}
+	// Array type must include items schema (MCP/JSON Schema requirement)
+	if p.Type == "array" {
+		itemsType := p.ItemsType
+		if itemsType == "" {
+			itemsType = "string" // safe default
+		}
+		s["items"] = map[string]interface{}{"type": itemsType}
+	}
 	return s
 }
