@@ -1,0 +1,41 @@
+# Binary
+rest-mcp.exe
+rest-mcp
+
+# Build output
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Config with secrets (keep example)
+rest-mcp.toml
+!rest-mcp.example.toml
+
+# Temp
+tmp/
+*.tmp
+*.log

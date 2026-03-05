@@ -1,0 +1,77 @@
+# REST MCP — Example Configuration
+# Copy to rest-mcp.toml and customize.
+
+# Required: Target API base URL
+base_url = "https://api.example.com"
+
+# Optional: Path or URL to OpenAPI spec (enables auto-discovery)
+# openapi_spec = "./openapi.json"
+
+# Log level: debug, info, warn, error (default: warn)
+log_level = "info"
+
+# HTTP request timeout (default: 30s)
+request_timeout = "30s"
+
+# Max response body size in bytes (default: 102400 = 100KB)
+max_response_size = 102400
+
+# Static headers injected into every request.
+# Use ${ENV_VAR} for secrets — never commit tokens.
+[headers]
+Authorization = "Bearer ${API_KEY}"
+Accept = "application/json"
+
+# Filters (only used with OpenAPI spec)
+# [filters]
+# include_tags = ["users", "billing"]
+# exclude_paths = ["/internal", "/admin"]
+# include_operations = []
+# exclude_operations = ["deleteEverything"]
+
+# Auth configuration (optional — headers above handle most cases)
+# [auth]
+# type = "bearer"  # bearer | apikey_header | apikey_query | basic | oauth2_cc
+
+# ─── Manual endpoint definitions ────────────────────────────────
+# Used when no openapi_spec is provided.
+
+[[endpoints]]
+name = "list_users"
+method = "GET"
+path = "/users"
+description = "List all users with optional filtering"
+
+  [endpoints.query]
+  page = { type = "integer", description = "Page number", default = 1 }
+  per_page = { type = "integer", description = "Items per page", default = 20 }
+  status = { type = "string", description = "Filter by status", enum = ["active", "inactive"] }
+
+[[endpoints]]
+name = "get_user"
+method = "GET"
+path = "/users/{id}"
+description = "Get a single user by ID"
+
+  [endpoints.path_params]
+  id = { type = "string", description = "User ID" }
+
+[[endpoints]]
+name = "create_user"
+method = "POST"
+path = "/users"
+description = "Create a new user"
+
+  [endpoints.body]
+  name = { type = "string", description = "Full name", required = true }
+  email = { type = "string", description = "Email address", required = true }
+  role = { type = "string", description = "User role", enum = ["admin", "member", "viewer"], default = "member" }
+
+[[endpoints]]
+name = "delete_user"
+method = "DELETE"
+path = "/users/{id}"
+description = "Delete a user by ID"
+
+  [endpoints.path_params]
+  id = { type = "string", description = "User ID" }
