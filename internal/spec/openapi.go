@@ -1,12 +1,18 @@
 package spec
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/getkin/kin-openapi/openapi2"
+	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
 
 	"github.com/devstroop/rest-mcp/internal/config"
@@ -53,8 +59,21 @@ func ParseOpenAPISpec(specPath string, filters config.Filters) ([]model.Operatio
 }
 
 // loadSpec loads an OpenAPI spec from a file path or URL.
-// The kin-openapi loader handles $ref resolution automatically.
+// Auto-detects Swagger 2.0 vs OpenAPI 3.x and converts 2.0 → 3.0 if needed.
 func loadSpec(specPath string) (*openapi3.T, error) {
+	// Read the raw spec data first to detect version
+	data, err := readSpecData(specPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Quick version detection: check for "swagger" key (2.0) vs "openapi" key (3.x)
+	if isSwagger2(data) {
+		logger.Info("detected Swagger 2.0 spec, converting to OpenAPI 3.0", nil)
+		return loadSwagger2(data)
+	}
+
+	// OpenAPI 3.x — use the standard loader
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
 
@@ -69,6 +88,62 @@ func loadSpec(specPath string) (*openapi3.T, error) {
 	return loader.LoadFromFile(specPath)
 }
 
+// readSpecData reads the raw bytes of a spec from file or URL.
+func readSpecData(specPath string) ([]byte, error) {
+	if httpRegex.MatchString(specPath) {
+		resp, err := http.Get(specPath)
+		if err != nil {
+			return nil, fmt.Errorf("fetch spec from %q: %w", specPath, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("fetch spec from %q: HTTP %d", specPath, resp.StatusCode)
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, 50<<20)) // 50MB limit
+	}
+
+	return os.ReadFile(specPath)
+}
+
+// isSwagger2 checks if the raw spec data contains a "swagger" key indicating v2.0.
+func isSwagger2(data []byte) bool {
+	// Quick JSON probe
+	var probe struct {
+		Swagger string `json:"swagger" yaml:"swagger"`
+		OpenAPI string `json:"openapi" yaml:"openapi"`
+	}
+	if err := json.Unmarshal(data, &probe); err == nil {
+		if strings.HasPrefix(probe.Swagger, "2.") {
+			return true
+		}
+		return false
+	}
+
+	// Fallback for YAML: look for the swagger field
+	s := string(data[:min(500, len(data))])
+	return strings.Contains(s, `"swagger"`) || strings.Contains(s, `swagger:`) || strings.Contains(s, `'swagger'`)
+}
+
+// loadSwagger2 parses raw Swagger 2.0 JSON/YAML and converts it to OpenAPI 3.0.
+func loadSwagger2(data []byte) (*openapi3.T, error) {
+	var doc2 openapi2.T
+	if err := json.Unmarshal(data, &doc2); err != nil {
+		return nil, fmt.Errorf("parse Swagger 2.0 spec: %w", err)
+	}
+
+	doc3, err := openapi2conv.ToV3(&doc2)
+	if err != nil {
+		return nil, fmt.Errorf("convert Swagger 2.0 → OpenAPI 3.0: %w", err)
+	}
+
+	logger.Info("Swagger 2.0 → OpenAPI 3.0 conversion complete", map[string]interface{}{
+		"title":   doc3.Info.Title,
+		"version": doc3.Info.Version,
+	})
+
+	return doc3, nil
+}
+
 // extractOperations iterates over all paths and methods in the spec,
 // converting each to a model.Operation. It applies tag/path/operation filters.
 func extractOperations(doc *openapi3.T, filters config.Filters) ([]model.Operation, error) {
@@ -76,14 +151,26 @@ func extractOperations(doc *openapi3.T, filters config.Filters) ([]model.Operati
 		return nil, fmt.Errorf("spec contains no paths")
 	}
 
-	var ops []model.Operation
+	// Pre-count paths for capacity hint
+	pathList := doc.Paths.InMatchingOrder()
+	// Rough estimate: ~2 methods per path on average
+	ops := make([]model.Operation, 0, len(pathList)*2)
 
 	// Iterate paths in matching order for deterministic output
-	for _, path := range doc.Paths.InMatchingOrder() {
+	for i, path := range pathList {
 		// Check path exclusion filter
 		if isPathExcluded(path, filters.ExcludePaths) {
 			logger.Debug("path excluded by filter", map[string]interface{}{"path": path})
 			continue
+		}
+
+		// Log progress for large specs (every 100 paths)
+		if len(pathList) > 100 && i > 0 && i%100 == 0 {
+			logger.Info("parsing progress", map[string]interface{}{
+				"paths_processed": i,
+				"paths_total":     len(pathList),
+				"operations":      len(ops),
+			})
 		}
 
 		pathItem := doc.Paths.Find(path)

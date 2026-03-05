@@ -1,0 +1,27 @@
+{
+  "name": "rest-mcp",
+  "version": "0.1.0",
+  "description": "Turn any REST API into MCP tools — via OpenAPI spec or manual config",
+  "keywords": ["mcp", "rest", "openapi", "swagger", "api", "llm", "ai", "tools"],
+  "homepage": "https://github.com/devstroop/rest-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devstroop/rest-mcp.git"
+  },
+  "license": "MIT",
+  "author": "devstroop",
+  "bin": {
+    "rest-mcp": "bin/run.js"
+  },
+  "scripts": {
+    "postinstall": "node bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}

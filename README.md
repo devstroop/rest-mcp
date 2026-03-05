@@ -67,14 +67,14 @@ The assistant calls `list_users(status="active")`, REST MCP translates that to `
 ```
 AI Assistant                  REST MCP                    Your API
      │                           │                           │
-     │──── tools/list ──────────▶│                           │
-     │◀─── [{list_users, ...}] ──│                           │
+     │──── tools/list ──────────>│                           │
+     │<─── [{list_users, ...}] ──│                           │
      │                           │                           │
-     │──── tools/call ──────────▶│                           │
-     │     list_users(page=2)    │── GET /users?page=2 ────▶│
+     │──── tools/call ──────────>│                           │
+     │     list_users(page=2)    │─── GET /users?page=2 ────>│
      │                           │   Authorization: Bearer…  │
-     │                           │◀──── 200 [{...}] ────────│
-     │◀─── result: [{...}] ─────│                           │
+     │                           │<──── 200 [{...}] ─────────│
+     │<─── result: [{...}] ──────│                           │
 ```
 
 1. **Startup** — REST MCP reads your OpenAPI spec (or TOML config) and builds a list of MCP tools

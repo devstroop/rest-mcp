@@ -1,0 +1,12 @@
+.git
+.github
+.goreleaser.yml
+*.md
+!README.md
+packaging/
+testdata/
+target/
+rest-mcp
+rest-mcp.exe
+rest-mcp.toml
+tmp_*

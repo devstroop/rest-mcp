@@ -56,37 +56,37 @@ Derived from [PRD.md](PRD.md).
 
 ---
 
-## M2 — Production Hardening
+## M2 — Production Hardening ✅
 
 > Goal: reliable in real-world usage with messy specs and large APIs.
 
 - [x] **M2-01** · Include/exclude filters: `include_tags`, `exclude_paths`, `include_operations`, `exclude_operations` `P1`
 - [x] **M2-02** · Response truncation — configurable `MAX_RESPONSE_SIZE` (default 100KB) `P0`
 - [x] **M2-03** · Request timeout — configurable `REQUEST_TIMEOUT` (default 30s) `P0`
-- [ ] **M2-04** · Graceful error handling — network errors, DNS failures, TLS errors → clear MCP error `P0`
+- [x] **M2-04** · Graceful error handling — network errors, DNS failures, TLS errors → clear MCP error `P0`
 - [x] **M2-05** · Raw JSON body pass-through for complex/nested schemas `P1`
 - [x] **M2-06** · Debug logging — log every outbound HTTP request (method, path, status, latency) `P0`
-- [ ] **M2-07** · Handle specs with 500+ operations efficiently (lazy generation, memory) `P1`
+- [x] **M2-07** · Handle specs with 500+ operations efficiently (lazy generation, memory) `P1`
 - [x] **M2-08** · Validate BASE_URL format at startup `P0`
 - [x] **M2-09** · Handle spec with no `operationId` on any operation (generate all names) `P0`
-- [ ] **M2-10** · Tool name collision detection and deterministic disambiguation `P1`
+- [x] **M2-10** · Tool name collision detection and deterministic disambiguation `P1`
 
 ---
 
-## M3 — Extended Auth & Distribution
+## M3 — Extended Auth & Distribution ✅
 
 > Goal: support real auth patterns and ship cross-platform binaries.
 
-- [ ] **M3-01** · API key in query parameter (`auth.type = "apikey_query"`) `P1`
-- [ ] **M3-02** · Basic auth (`auth.type = "basic"`) `P1`
-- [ ] **M3-03** · OAuth2 client-credentials flow with auto-refresh + token caching `P2`
-- [ ] **M3-04** · Swagger 2.0 spec parser `P1`
-- [ ] **M3-05** · goreleaser config — Linux amd64/arm64, macOS amd64/arm64, Windows amd64 `P0`
-- [ ] **M3-06** · GitHub Actions CI — build + test + release on tag `P0`
-- [ ] **M3-07** · Homebrew tap formula `P1`
-- [ ] **M3-08** · npm wrapper package (`npx rest-mcp`) `P1`
-- [ ] **M3-09** · Docker image (Alpine-based) `P2`
-- [ ] **M3-10** · Install script (`curl | sh`) `P1`
+- [x] **M3-01** · API key in query parameter (`auth.type = "apikey_query"`) `P1`
+- [x] **M3-02** · Basic auth (`auth.type = "basic"`) `P1`
+- [x] **M3-03** · OAuth2 client-credentials flow with auto-refresh + token caching `P2`
+- [x] **M3-04** · Swagger 2.0 spec parser `P1`
+- [x] **M3-05** · goreleaser config — Linux amd64/arm64, macOS amd64/arm64, Windows amd64 `P0`
+- [x] **M3-06** · GitHub Actions CI — build + test + release on tag `P0`
+- [x] **M3-07** · Homebrew tap formula `P1`
+- [x] **M3-08** · npm wrapper package (`npx rest-mcp`) `P1`
+- [x] **M3-09** · Docker image (Alpine-based) `P2`
+- [x] **M3-10** · Install script (`curl | sh`) `P1`
 
 ---
 

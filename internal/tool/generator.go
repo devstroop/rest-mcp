@@ -2,6 +2,7 @@ package tool
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -16,14 +17,22 @@ type ToolEntry struct {
 }
 
 // Generate creates MCP tools from operations.
+// It detects name collisions and disambiguates by appending _2, _3, etc.
 func Generate(ops []model.Operation) []ToolEntry {
 	entries := make([]ToolEntry, 0, len(ops))
+	nameCount := make(map[string]int, len(ops))
 
-	for _, op := range ops {
-		tool := buildTool(op)
+	for i := range ops {
+		// Track how many times this name has appeared
+		nameCount[ops[i].Name]++
+		if nameCount[ops[i].Name] > 1 {
+			ops[i].Name = fmt.Sprintf("%s_%d", ops[i].Name, nameCount[ops[i].Name])
+		}
+
+		tool := buildTool(ops[i])
 		entries = append(entries, ToolEntry{
 			Tool:      tool,
-			Operation: op,
+			Operation: ops[i],
 		})
 	}
 

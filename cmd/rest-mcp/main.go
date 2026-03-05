@@ -74,6 +74,7 @@ func main() {
 		cfg.Headers,
 		cfg.Timeout(),
 		cfg.MaxResponseSize,
+		cfg.Auth,
 	)
 
 	// Build MCP server
