@@ -27,6 +27,16 @@ type Operation struct {
 
 	// Tags from OpenAPI spec (used for filtering).
 	Tags []string
+
+	// Headers are per-endpoint header overrides (key → value).
+	Headers map[string]string
+
+	// ResponsePath is a dot-notation path to extract from the JSON response
+	// (e.g. "data.items"). Empty means return the full response.
+	ResponsePath string
+
+	// Hidden indicates the operation should be skipped (from x-rest-mcp-hidden).
+	Hidden bool
 }
 
 // Param represents a single parameter for a tool argument.

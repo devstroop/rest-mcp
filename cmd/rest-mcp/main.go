@@ -39,8 +39,9 @@ func main() {
 	// Configure logger
 	logger.SetLevel(logger.ParseLevel(cfg.LogLevel))
 	logger.Info("starting rest-mcp", map[string]interface{}{
-		"version":  version,
-		"base_url": cfg.BaseURL,
+		"version":   version,
+		"base_url":  cfg.BaseURL,
+		"transport": cfg.Transport,
 	})
 
 	// Parse endpoints into operations
@@ -75,6 +76,7 @@ func main() {
 		cfg.Timeout(),
 		cfg.MaxResponseSize,
 		cfg.Auth,
+		cfg.Retry,
 	)
 
 	// Build MCP server
@@ -84,6 +86,7 @@ func main() {
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
 		server.WithLogging(),
+		server.WithResourceCapabilities(false, false),
 	)
 
 	// Register tools
@@ -92,14 +95,46 @@ func main() {
 		mcpServer.AddTool(entry.Tool, makeHandler(exec, op))
 	}
 
-	logger.Info("mcp server ready", map[string]interface{}{
-		"tools": len(entries),
+	// Register spec summary resource
+	registerSpecResource(mcpServer, ops)
+
+	// Set up config reload on SIGHUP (M4-05)
+	watchReload(func() {
+		reloadConfig(flags, mcpServer, exec)
 	})
 
-	// Start stdio transport
-	if err := server.ServeStdio(mcpServer); err != nil {
-		logger.Error("server error", map[string]interface{}{"error": err.Error()})
-		os.Exit(1)
+	logger.Info("mcp server ready", map[string]interface{}{
+		"tools":     len(entries),
+		"transport": cfg.Transport,
+	})
+
+	// Start the appropriate transport
+	switch cfg.Transport {
+	case "sse":
+		sseServer := server.NewSSEServer(mcpServer)
+		logger.Info("starting SSE transport", map[string]interface{}{
+			"addr": cfg.ListenAddr,
+		})
+		if err := sseServer.Start(cfg.ListenAddr); err != nil {
+			logger.Error("SSE server error", map[string]interface{}{"error": err.Error()})
+			os.Exit(1)
+		}
+
+	case "streamable-http":
+		httpServer := server.NewStreamableHTTPServer(mcpServer)
+		logger.Info("starting Streamable HTTP transport", map[string]interface{}{
+			"addr": cfg.ListenAddr,
+		})
+		if err := httpServer.Start(cfg.ListenAddr); err != nil {
+			logger.Error("Streamable HTTP server error", map[string]interface{}{"error": err.Error()})
+			os.Exit(1)
+		}
+
+	default: // "stdio"
+		if err := server.ServeStdio(mcpServer); err != nil {
+			logger.Error("server error", map[string]interface{}{"error": err.Error()})
+			os.Exit(1)
+		}
 	}
 }
 
@@ -111,6 +146,8 @@ func parseFlags() config.CLIFlags {
 	flag.StringVar(&flags.Spec, "spec", "", "Path or URL to OpenAPI spec")
 	flag.BoolVar(&flags.DryRun, "dry-run", false, "Print generated tools as JSON and exit")
 	flag.StringVar(&flags.LogLevel, "log-level", "", "Log level: debug, info, warn, error")
+	flag.StringVar(&flags.Transport, "transport", "", "Transport mode: stdio, sse, streamable-http (default: stdio)")
+	flag.StringVar(&flags.ListenAddr, "listen-addr", "", "Listen address for SSE/HTTP transport (default: :8080)")
 	flag.BoolVar(&flags.Version, "version", false, "Print version and exit")
 	flag.Parse()
 	return flags
@@ -189,6 +226,67 @@ func formatResponse(r *executor.Result) string {
 	return fmt.Sprintf("HTTP %d\n\n%s", r.StatusCode, r.Body)
 }
 
+// registerSpecResource registers an MCP resource that exposes a summary of the API spec.
+func registerSpecResource(mcpServer *server.MCPServer, ops []model.Operation) {
+	if len(ops) == 0 {
+		return
+	}
+
+	resource := mcp.Resource{
+		URI:         "rest-mcp://spec/summary",
+		Name:        "API Spec Summary",
+		Description: "Summary of all available API operations exposed as MCP tools",
+		MIMEType:    "application/json",
+	}
+
+	mcpServer.AddResource(resource, func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		type opSummary struct {
+			Name        string   `json:"name"`
+			Method      string   `json:"method"`
+			Path        string   `json:"path"`
+			Description string   `json:"description,omitempty"`
+			Tags        []string `json:"tags,omitempty"`
+			PathParams  []string `json:"path_params,omitempty"`
+			QueryParams []string `json:"query_params,omitempty"`
+			BodyParams  []string `json:"body_params,omitempty"`
+		}
+
+		summaries := make([]opSummary, 0, len(ops))
+		for _, op := range ops {
+			s := opSummary{
+				Name:        op.Name,
+				Method:      op.Method,
+				Path:        op.Path,
+				Description: op.Description,
+				Tags:        op.Tags,
+			}
+			for _, p := range op.PathParams {
+				s.PathParams = append(s.PathParams, p.Name)
+			}
+			for _, p := range op.QueryParams {
+				s.QueryParams = append(s.QueryParams, p.Name)
+			}
+			for _, p := range op.BodyParams {
+				s.BodyParams = append(s.BodyParams, p.Name)
+			}
+			summaries = append(summaries, s)
+		}
+
+		data, _ := json.MarshalIndent(map[string]interface{}{
+			"total_operations": len(summaries),
+			"operations":       summaries,
+		}, "", "  ")
+
+		return []mcp.ResourceContents{
+			mcp.TextResourceContents{
+				URI:      "rest-mcp://spec/summary",
+				MIMEType: "application/json",
+				Text:     string(data),
+			},
+		}, nil
+	})
+}
+
 // dryRun prints the generated tools as JSON and exits.
 func dryRun(entries []tool.ToolEntry) {
 	tools := make([]map[string]interface{}, 0, len(entries))
@@ -209,4 +307,64 @@ func dryRun(entries []tool.ToolEntry) {
 
 	output, _ := json.MarshalIndent(tools, "", "  ")
 	fmt.Println(string(output))
+}
+
+// reloadConfig reloads the config file, re-parses operations, and atomically
+// replaces tools and resources on the running MCP server. Called on SIGHUP.
+func reloadConfig(flags config.CLIFlags, mcpServer *server.MCPServer, exec *executor.Executor) {
+	logger.Info("reloading configuration")
+
+	cfg, err := config.LoadConfig(flags)
+	if err != nil {
+		logger.Error("reload failed: config error", map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	// Update logger level
+	logger.SetLevel(logger.ParseLevel(cfg.LogLevel))
+
+	// Re-parse operations
+	ops, err := loadOperations(cfg)
+	if err != nil {
+		logger.Error("reload failed: operation parse error", map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	if len(ops) == 0 {
+		logger.Error("reload failed: no operations found")
+		return
+	}
+
+	// Regenerate tools
+	entries := tool.Generate(ops)
+
+	// Update executor config
+	exec.UpdateConfig(
+		cfg.BaseURL,
+		cfg.Headers,
+		cfg.Timeout(),
+		cfg.MaxResponseSize,
+		cfg.Auth,
+		cfg.Retry,
+	)
+
+	// Atomically replace all tools
+	serverTools := make([]server.ServerTool, 0, len(entries))
+	for _, entry := range entries {
+		op := entry.Operation
+		serverTools = append(serverTools, server.ServerTool{
+			Tool:    entry.Tool,
+			Handler: makeHandler(exec, op),
+		})
+	}
+	mcpServer.SetTools(serverTools...)
+
+	// Re-register spec resource
+	mcpServer.DeleteResources("rest-mcp://spec/summary")
+	registerSpecResource(mcpServer, ops)
+
+	logger.Info("configuration reloaded", map[string]interface{}{
+		"tools": len(entries),
+		"ops":   len(ops),
+	})
 }

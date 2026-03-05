@@ -21,10 +21,20 @@ type Config struct {
 	RequestTimeout  string            `toml:"request_timeout"`
 	MaxResponseSize int               `toml:"max_response_size"`
 	DryRun          bool              `toml:"dry_run"`
+	Transport       string            `toml:"transport"`    // stdio, sse, streamable-http
+	ListenAddr      string            `toml:"listen_addr"` // address for SSE/HTTP transports
 	Headers         map[string]string `toml:"headers"`
 	Filters         Filters           `toml:"filters"`
 	Auth            Auth              `toml:"auth"`
+	Retry           Retry             `toml:"retry"`
 	Endpoints       []Endpoint        `toml:"endpoints"`
+}
+
+// Retry configures automatic request retry with exponential backoff.
+type Retry struct {
+	MaxAttempts int    `toml:"max_attempts"` // 0 = disabled (default)
+	InitialWait string `toml:"initial_wait"` // e.g. "500ms" (default)
+	MaxWait     string `toml:"max_wait"`     // e.g. "30s" (default)
 }
 
 // Filters configures which operations to include/exclude.
@@ -48,13 +58,15 @@ type Auth struct {
 
 // Endpoint defines a manual API endpoint.
 type Endpoint struct {
-	Name        string                     `toml:"name"`
-	Method      string                     `toml:"method"`
-	Path        string                     `toml:"path"`
-	Description string                     `toml:"description"`
-	PathParams  map[string]ParamDef        `toml:"path_params"`
-	Query       map[string]ParamDef        `toml:"query"`
-	Body        map[string]ParamDef        `toml:"body"`
+	Name         string                     `toml:"name"`
+	Method       string                     `toml:"method"`
+	Path         string                     `toml:"path"`
+	Description  string                     `toml:"description"`
+	PathParams   map[string]ParamDef        `toml:"path_params"`
+	Query        map[string]ParamDef        `toml:"query"`
+	Body         map[string]ParamDef        `toml:"body"`
+	Headers      map[string]string          `toml:"headers"`
+	ResponsePath string                     `toml:"response_path"`
 }
 
 // ParamDef defines a parameter in TOML config.
@@ -73,6 +85,8 @@ type CLIFlags struct {
 	Spec       string
 	DryRun     bool
 	LogLevel   string
+	Transport  string
+	ListenAddr string
 	Version    bool
 }
 
@@ -133,6 +147,8 @@ func defaults() *Config {
 		LogLevel:        "warn",
 		RequestTimeout:  "30s",
 		MaxResponseSize: 102400,
+		Transport:       "stdio",
+		ListenAddr:      ":8080",
 		Headers:         make(map[string]string),
 	}
 }
@@ -168,6 +184,12 @@ func applyEnv(cfg *Config) {
 	if v := os.Getenv("DRY_RUN"); v != "" {
 		cfg.DryRun = v == "true" || v == "1"
 	}
+	if v := os.Getenv("TRANSPORT"); v != "" {
+		cfg.Transport = v
+	}
+	if v := os.Getenv("LISTEN_ADDR"); v != "" {
+		cfg.ListenAddr = v
+	}
 	if v := os.Getenv("INCLUDE_TAGS"); v != "" {
 		cfg.Filters.IncludeTags = splitCSV(v)
 	}
@@ -189,6 +211,12 @@ func applyCLI(cfg *Config, flags CLIFlags) {
 	}
 	if flags.DryRun {
 		cfg.DryRun = true
+	}
+	if flags.Transport != "" {
+		cfg.Transport = flags.Transport
+	}
+	if flags.ListenAddr != "" {
+		cfg.ListenAddr = flags.ListenAddr
 	}
 }
 

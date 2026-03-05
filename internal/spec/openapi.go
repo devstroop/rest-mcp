@@ -206,6 +206,16 @@ func extractOperations(doc *openapi3.T, filters config.Filters) ([]model.Operati
 				continue
 			}
 
+			// Skip operations marked as hidden via x-rest-mcp-hidden
+			if op.Hidden {
+				logger.Debug("operation hidden by x-rest-mcp-hidden", map[string]interface{}{
+					"path":   path,
+					"method": method,
+					"name":   op.Name,
+				})
+				continue
+			}
+
 			ops = append(ops, op)
 		}
 	}
@@ -218,12 +228,25 @@ func convertOperation(path, method string, op *openapi3.Operation, pathLevelPara
 	name := deriveToolName(op, path, method)
 	desc := deriveDescription(op)
 
+	// Handle OpenAPI extensions (M4-06)
+	// x-rest-mcp-name overrides the tool name
+	if extName, ok := getExtensionString(op.Extensions, "x-rest-mcp-name"); ok {
+		name = sanitizeToolName(extName)
+	}
+
+	// x-rest-mcp-hidden hides the operation
+	hidden := false
+	if extHidden, ok := getExtensionBool(op.Extensions, "x-rest-mcp-hidden"); ok {
+		hidden = extHidden
+	}
+
 	result := model.Operation{
 		Name:        name,
 		Method:      strings.ToUpper(method),
 		Path:        path,
 		Description: desc,
 		Tags:        op.Tags,
+		Hidden:      hidden,
 	}
 
 	// Merge path-level and operation-level parameters.
@@ -572,4 +595,47 @@ func stringInSlice(s string, list []string) bool {
 		}
 	}
 	return false
+}
+
+// getExtensionString retrieves a string value from OpenAPI extensions map.
+func getExtensionString(extensions map[string]interface{}, key string) (string, bool) {
+	if extensions == nil {
+		return "", false
+	}
+	val, ok := extensions[key]
+	if !ok {
+		return "", false
+	}
+	// The value may be a raw JSON string or already decoded
+	switch v := val.(type) {
+	case string:
+		return v, true
+	case json.RawMessage:
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			return s, true
+		}
+	}
+	return fmt.Sprintf("%v", val), true
+}
+
+// getExtensionBool retrieves a boolean value from OpenAPI extensions map.
+func getExtensionBool(extensions map[string]interface{}, key string) (bool, bool) {
+	if extensions == nil {
+		return false, false
+	}
+	val, ok := extensions[key]
+	if !ok {
+		return false, false
+	}
+	switch v := val.(type) {
+	case bool:
+		return v, true
+	case json.RawMessage:
+		var b bool
+		if err := json.Unmarshal(v, &b); err == nil {
+			return b, true
+		}
+	}
+	return false, false
 }

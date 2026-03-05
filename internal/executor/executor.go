@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/devstroop/rest-mcp/internal/cache"
 	"github.com/devstroop/rest-mcp/internal/config"
 	"github.com/devstroop/rest-mcp/internal/logger"
 	"github.com/devstroop/rest-mcp/internal/model"
@@ -34,6 +35,8 @@ type Executor struct {
 	headers         map[string]string
 	maxResponseSize int
 	auth            config.Auth
+	retry           config.Retry
+	respCache       *cache.Cache
 
 	// OAuth2 token cache
 	tokenMu     sync.Mutex
@@ -42,7 +45,7 @@ type Executor struct {
 }
 
 // New creates an Executor with the given configuration.
-func New(baseURL string, headers map[string]string, timeout time.Duration, maxResponseSize int, auth config.Auth) *Executor {
+func New(baseURL string, headers map[string]string, timeout time.Duration, maxResponseSize int, auth config.Auth, retry config.Retry) *Executor {
 	return &Executor{
 		client: &http.Client{
 			Timeout: timeout,
@@ -51,7 +54,26 @@ func New(baseURL string, headers map[string]string, timeout time.Duration, maxRe
 		headers:         headers,
 		maxResponseSize: maxResponseSize,
 		auth:            auth,
+		retry:           retry,
+		respCache:       cache.New(1000),
 	}
+}
+
+// UpdateConfig updates the executor's configuration for hot-reload (M4-05).
+// Thread-safe: called from the SIGHUP handler goroutine.
+func (e *Executor) UpdateConfig(baseURL string, headers map[string]string, timeout time.Duration, maxResponseSize int, auth config.Auth, retry config.Retry) {
+	e.tokenMu.Lock()
+	defer e.tokenMu.Unlock()
+
+	e.baseURL = strings.TrimRight(baseURL, "/")
+	e.headers = headers
+	e.client.Timeout = timeout
+	e.maxResponseSize = maxResponseSize
+	e.auth = auth
+	e.retry = retry
+	e.cachedToken = ""
+	e.tokenExpiry = time.Time{}
+	e.respCache.Clear()
 }
 
 // Execute performs the HTTP request described by the operation using the provided arguments.
@@ -127,6 +149,11 @@ func (e *Executor) Execute(ctx context.Context, op model.Operation, args map[str
 		req.Header.Set(k, v)
 	}
 
+	// Inject per-endpoint header overrides (M4-07)
+	for k, v := range op.Headers {
+		req.Header.Set(k, v)
+	}
+
 	// Inject auth credentials
 	if err := e.applyAuth(ctx, req); err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
@@ -137,6 +164,19 @@ func (e *Executor) Execute(ctx context.Context, op model.Operation, args map[str
 		req.Header.Set("Content-Type", "application/json")
 	}
 
+	// Set conditional request headers from cache (M4-09)
+	cacheKey := cache.Key(op.Method, fullURL)
+	if op.Method == "GET" || op.Method == "HEAD" {
+		if cached := e.respCache.Get(cacheKey); cached != nil {
+			if cached.ETag != "" {
+				req.Header.Set("If-None-Match", cached.ETag)
+			}
+			if cached.LastModified != "" {
+				req.Header.Set("If-Modified-Since", cached.LastModified)
+			}
+		}
+	}
+
 	// Log outbound request
 	start := time.Now()
 	logger.Debug("outbound request", map[string]interface{}{
@@ -144,14 +184,100 @@ func (e *Executor) Execute(ctx context.Context, op model.Operation, args map[str
 		"url":    fullURL,
 	})
 
-	// Execute
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return nil, classifyError(err)
+	// Execute with retry
+	maxAttempts := 1
+	if e.retry.MaxAttempts > 0 {
+		maxAttempts = e.retry.MaxAttempts
+	}
+	initialWait := parseDurationOrDefault(e.retry.InitialWait, 500*time.Millisecond)
+	maxWait := parseDurationOrDefault(e.retry.MaxWait, 30*time.Second)
+
+	var resp *http.Response
+	var lastErr error
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, lastErr = e.client.Do(req)
+		if lastErr == nil {
+			// Success or non-retryable HTTP status
+			if resp.StatusCode < 500 || attempt == maxAttempts {
+				break
+			}
+			// Server error — close body and retry
+			resp.Body.Close()
+			logger.Warn("retrying request", map[string]interface{}{
+				"attempt": attempt,
+				"status":  resp.StatusCode,
+				"method":  op.Method,
+				"url":     fullURL,
+			})
+		} else {
+			logger.Warn("request error, retrying", map[string]interface{}{
+				"attempt": attempt,
+				"error":   lastErr.Error(),
+			})
+		}
+
+		if attempt < maxAttempts {
+			wait := initialWait * time.Duration(1<<uint(attempt-1)) // exponential
+			if wait > maxWait {
+				wait = maxWait
+			}
+			select {
+			case <-ctx.Done():
+				if lastErr != nil {
+					return nil, classifyError(lastErr)
+				}
+				return nil, ctx.Err()
+			case <-time.After(wait):
+			}
+
+			// Rebuild request for retry (body may have been consumed)
+			req, err = http.NewRequestWithContext(ctx, op.Method, fullURL, rebuildBody(op, args))
+			if err != nil {
+				return nil, fmt.Errorf("create retry request: %w", err)
+			}
+			for k, v := range e.headers {
+				req.Header.Set(k, v)
+			}
+			for k, v := range op.Headers {
+				req.Header.Set(k, v)
+			}
+			if err := e.applyAuth(ctx, req); err != nil {
+				return nil, fmt.Errorf("auth: %w", err)
+			}
+			if req.Header.Get("Content-Type") == "" && req.Body != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+		}
+	}
+
+	if lastErr != nil {
+		return nil, classifyError(lastErr)
 	}
 	defer resp.Body.Close()
 
 	latency := time.Since(start)
+
+	// Handle 304 Not Modified — return cached response (M4-09)
+	if resp.StatusCode == http.StatusNotModified {
+		if cached := e.respCache.Get(cacheKey); cached != nil {
+			logger.Debug("cache hit (304 Not Modified)", map[string]interface{}{
+				"method": op.Method,
+				"url":    fullURL,
+			})
+			result := &Result{
+				StatusCode: cached.StatusCode,
+				Body:       cached.Body,
+				IsError:    cached.StatusCode >= 400,
+			}
+			if op.ResponsePath != "" && !result.IsError {
+				if extracted, err := extractJSONPath(cached.Body, op.ResponsePath); err == nil {
+					result.Body = extracted
+				}
+			}
+			return result, nil
+		}
+	}
 
 	// Read response body with size limit
 	limitedReader := io.LimitReader(resp.Body, int64(e.maxResponseSize)+1)
@@ -180,11 +306,46 @@ func (e *Executor) Execute(ctx context.Context, op model.Operation, args map[str
 
 	isError := resp.StatusCode >= 400
 
-	return &Result{
+	result := &Result{
 		StatusCode: resp.StatusCode,
 		Body:       bodyStr,
 		IsError:    isError,
-	}, nil
+	}
+
+	// Apply response path extraction (M4-04)
+	if op.ResponsePath != "" && !isError {
+		if extracted, err := extractJSONPath(bodyStr, op.ResponsePath); err == nil {
+			result.Body = extracted
+		} else {
+			logger.Debug("response_path extraction failed, returning full body", map[string]interface{}{
+				"path":  op.ResponsePath,
+				"error": err.Error(),
+			})
+		}
+	}
+
+	// Cache response if ETag or Last-Modified present (M4-09)
+	if (op.Method == "GET" || op.Method == "HEAD") && !isError {
+		etag := resp.Header.Get("ETag")
+		lastMod := resp.Header.Get("Last-Modified")
+		if etag != "" || lastMod != "" {
+			e.respCache.Set(cacheKey, &cache.Entry{
+				Body:         bodyStr,
+				StatusCode:   resp.StatusCode,
+				ETag:         etag,
+				LastModified: lastMod,
+				CachedAt:     time.Now(),
+			})
+			logger.Debug("response cached", map[string]interface{}{
+				"method":        op.Method,
+				"url":           fullURL,
+				"etag":          etag,
+				"last_modified": lastMod,
+			})
+		}
+	}
+
+	return result, nil
 }
 
 // applyAuth injects authentication credentials into the HTTP request
@@ -309,6 +470,86 @@ func (e *Executor) getOAuth2Token(ctx context.Context) (string, error) {
 	})
 
 	return e.cachedToken, nil
+}
+
+// rebuildBody reconstructs the request body for retry attempts.
+func rebuildBody(op model.Operation, args map[string]interface{}) io.Reader {
+	if len(op.BodyParams) > 0 {
+		bodyMap := make(map[string]interface{})
+		for _, p := range op.BodyParams {
+			if val, ok := args[p.Name]; ok {
+				bodyMap[p.Name] = val
+			}
+		}
+		if len(bodyMap) > 0 {
+			bodyJSON, _ := json.Marshal(bodyMap)
+			return strings.NewReader(string(bodyJSON))
+		}
+	}
+	if rawBody, ok := args["body"]; ok {
+		switch v := rawBody.(type) {
+		case string:
+			return strings.NewReader(v)
+		case map[string]interface{}:
+			b, _ := json.Marshal(v)
+			return strings.NewReader(string(b))
+		}
+	}
+	return nil
+}
+
+// parseDurationOrDefault parses a duration string and returns a default if invalid/empty.
+func parseDurationOrDefault(s string, defaultVal time.Duration) time.Duration {
+	if s == "" {
+		return defaultVal
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return defaultVal
+	}
+	return d
+}
+
+// extractJSONPath extracts a value from a JSON string using dot-notation path.
+// Supports paths like "data", "data.items", "results.0.name".
+func extractJSONPath(jsonStr string, path string) (string, error) {
+	var data interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+		return "", fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	parts := strings.Split(path, ".")
+	current := data
+
+	for _, part := range parts {
+		switch v := current.(type) {
+		case map[string]interface{}:
+			val, ok := v[part]
+			if !ok {
+				return "", fmt.Errorf("key %q not found in object", part)
+			}
+			current = val
+		case []interface{}:
+			// Try to parse as array index
+			var idx int
+			if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+				return "", fmt.Errorf("expected array index, got %q", part)
+			}
+			if idx < 0 || idx >= len(v) {
+				return "", fmt.Errorf("array index %d out of bounds (length %d)", idx, len(v))
+			}
+			current = v[idx]
+		default:
+			return "", fmt.Errorf("cannot traverse into %T at %q", current, part)
+		}
+	}
+
+	// Marshal the result back to JSON
+	result, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal extracted value: %w", err)
+	}
+	return string(result), nil
 }
 
 // classifyError inspects an HTTP request error and returns a user-friendly

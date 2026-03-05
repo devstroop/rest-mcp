@@ -198,6 +198,8 @@ Load the spec directly from a URL:
 | `INCLUDE_TAGS` | Only include operations with these tags (comma-separated) | all |
 | `EXCLUDE_PATHS` | Skip operations matching these path prefixes | — |
 | `DRY_RUN` | Print generated tools and exit | `false` |
+| `TRANSPORT` | Transport mode: `stdio`, `sse`, `streamable-http` | `stdio` |
+| `LISTEN_ADDR` | Listen address for SSE/HTTP transport | `:8080` |
 
 ---
 
@@ -210,6 +212,8 @@ Flags:
   --base-url string    Target API base URL
   --spec string        Path or URL to OpenAPI spec
   --config string      Path to TOML config file (default "rest-mcp.toml")
+  --transport string   Transport mode: stdio, sse, streamable-http (default "stdio")
+  --listen-addr string Listen address for SSE/HTTP transport (default ":8080")
   --dry-run            Print tools as JSON and exit
   --log-level string   Log level (default "warn")
   --version            Print version
@@ -220,8 +224,14 @@ Flags:
 # Quick check — see what tools would be generated
 rest-mcp --spec ./openapi.json --dry-run
 
-# Run with spec
+# Run with spec (stdio transport — default for MCP clients)
 rest-mcp --base-url https://api.example.com --spec ./openapi.json
+
+# Run with SSE transport (for web-based MCP clients)
+rest-mcp --base-url https://api.example.com --spec ./openapi.json --transport sse --listen-addr :3000
+
+# Run with Streamable HTTP transport
+rest-mcp --base-url https://api.example.com --spec ./openapi.json --transport streamable-http
 
 # Run with manual config
 rest-mcp --config ./my-api.toml
@@ -299,7 +309,7 @@ rest-mcp --config ./my-api.toml
 | **API key header** | `headers: { "X-API-Key": "xxx" }` |
 | **API key in query** | `auth.type = "apikey_query"` in TOML |
 | **Basic auth** | `auth.type = "basic"` in TOML |
-| **OAuth2 client credentials** | `auth.type = "oauth2_cc"` in TOML (planned) |
+| **OAuth2 client credentials** | `auth.type = "oauth2_cc"` in TOML |
 
 Use `${ENV_VAR}` in any header value or config string to reference environment variables:
 
@@ -333,6 +343,93 @@ exclude_operations = ["dangerousDelete"]
 
 ---
 
+## Advanced Features
+
+### Per-Endpoint Headers
+
+Override headers for specific endpoints in your TOML config:
+
+```toml
+[[endpoints]]
+name = "upload_document"
+method = "POST"
+path = "/documents"
+
+  [endpoints.headers]
+  Content-Type = "multipart/form-data"
+  X-Upload-Token = "${UPLOAD_TOKEN}"
+```
+
+### Response Path Extraction
+
+Extract a specific field from API responses using dot-notation:
+
+```toml
+[[endpoints]]
+name = "list_items"
+method = "GET"
+path = "/api/v2/items"
+response_path = "data.items"  # only return the nested items array
+```
+
+### Request Retry
+
+Automatically retry failed requests with exponential backoff:
+
+```toml
+[retry]
+max_attempts = 3
+initial_wait = "500ms"
+max_wait = "10s"
+```
+
+Retries are triggered on 5xx server errors and network failures.
+
+### OpenAPI Extensions
+
+Customize tool behavior directly in your OpenAPI spec:
+
+```yaml
+paths:
+  /users:
+    get:
+      x-rest-mcp-name: "search_users"  # Override the tool name
+      operationId: listUsers
+  /internal/debug:
+    get:
+      x-rest-mcp-hidden: true  # Hide from MCP tools
+```
+
+### MCP Resources
+
+REST MCP automatically exposes a `rest-mcp://spec/summary` resource containing a JSON summary of all available API operations. LLM clients can read this resource for context about the API.
+
+### Transport Modes
+
+| Mode | Flag | Use Case |
+|------|------|----------|
+| **stdio** (default) | `--transport stdio` | Claude Desktop, VS Code, local agents |
+| **SSE** | `--transport sse` | Web-based MCP clients, remote access |
+| **Streamable HTTP** | `--transport streamable-http` | Modern HTTP-based MCP clients |
+
+### Response Caching
+
+REST MCP automatically caches GET responses that include `ETag` or `Last-Modified` headers. On subsequent requests, it sends `If-None-Match` / `If-Modified-Since` headers. If the server responds with `304 Not Modified`, the cached response is returned instantly — reducing latency and API quota usage.
+
+No configuration is needed; caching is always active for eligible responses.
+
+### Config Reload (SIGHUP)
+
+On Unix/macOS, send `SIGHUP` to the running process to hot-reload the configuration without restarting:
+
+```bash
+kill -HUP $(pgrep rest-mcp)
+```
+
+This re-reads the config file, re-parses operations, and atomically replaces all tools and resources. Active connections are not interrupted. (Not available on Windows — restart the process instead.)
+
+---
+
 ## Architecture
 
 ```
@@ -340,11 +437,11 @@ exclude_operations = ["dangerousDelete"]
 │  Spec Parser │────▶│Tool Generator│────▶│Req. Executor │
 │              │      │              │     │              │
 │ OpenAPI 3.x  │      │ MCP tools    │     │ HTTP client  │
-│ Swagger 2.0  │      │ JSON Schema  │     │ Headers/Auth │
-│ Manual TOML  │      │ Validation   │     │ Timeouts     │
+│ Swagger 2.0  │      │ JSON Schema  │     │ Auth + Retry │
+│ Manual TOML  │      │ Validation   │     │ Path Extract │
 └──────────────┘      └──────────────┘     └──────┬───────┘
                                                   │
-                          stdio (JSON-RPC)        │ HTTPS
+                   stdio / SSE / HTTP             │ HTTPS
                      ◀────────────────────        ▼
                       AI Assistant          Target REST API
 ```
@@ -380,10 +477,15 @@ rest-mcp/
 │   └── main.go
 ├── internal/
 │   ├── config/            # Config loader (TOML + env + flags)
-│   ├── spec/              # OpenAPI / Swagger / TOML parser → []Operation
+│   ├── spec/              # OpenAPI / Swagger 2.0 / TOML parser → []Operation
 │   ├── tool/              # Operation → MCP tool definition
-│   ├── executor/          # HTTP request builder + executor
-│   └── transport/         # MCP stdio JSON-RPC handler
+│   ├── executor/          # HTTP request builder + executor + retry
+│   ├── model/             # Internal canonical types
+│   └── logger/            # Structured JSON logger
+├── packaging/             # npm, Homebrew distribution
+├── .github/workflows/     # CI + Release automation
+├── .goreleaser.yml        # Cross-platform release config
+├── Dockerfile             # Alpine-based container image
 ├── rest-mcp.example.toml  # Example manual config
 └── README.md
 ```

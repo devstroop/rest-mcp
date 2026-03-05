@@ -28,10 +28,12 @@ func ParseManualEndpoints(endpoints []config.Endpoint) ([]model.Operation, error
 		}
 
 		op := model.Operation{
-			Name:        ep.Name,
-			Method:      strings.ToUpper(ep.Method),
-			Path:        ep.Path,
-			Description: ep.Description,
+			Name:         ep.Name,
+			Method:       strings.ToUpper(ep.Method),
+			Path:         ep.Path,
+			Description:  ep.Description,
+			Headers:      ep.Headers,
+			ResponsePath: ep.ResponsePath,
 		}
 
 		// Extract path parameters from path template AND from [endpoints.path] config

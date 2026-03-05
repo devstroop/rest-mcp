@@ -90,29 +90,29 @@ Derived from [PRD.md](PRD.md).
 
 ---
 
-## M4 — Advanced
+## M4 — Advanced ✅
 
 > Post-launch improvements driven by community feedback.
 
-- [ ] **M4-01** · SSE transport (MCP over HTTP SSE) `P2`
-- [ ] **M4-02** · Streamable HTTP transport `P2`
-- [ ] **M4-03** · File upload support (`multipart/form-data`) `P1`
-- [ ] **M4-04** · JSON-path response extraction (`response_path = "$.data.items"`) `P2`
-- [ ] **M4-05** · Config reload on `SIGHUP` without restart `P2`
-- [ ] **M4-06** · OpenAPI extensions: `x-rest-mcp-name`, `x-rest-mcp-hidden` `P2`
-- [ ] **M4-07** · Per-endpoint header overrides `P2`
-- [ ] **M4-08** · Request retry with exponential backoff (configurable) `P2`
-- [ ] **M4-09** · Response caching (ETag / Last-Modified aware) `P2`
-- [ ] **M4-10** · MCP resources — expose spec summary as a resource `P2`
+- [x] **M4-01** · SSE transport (MCP over HTTP SSE) `P2`
+- [x] **M4-02** · Streamable HTTP transport `P2`
+- [x] **M4-03** · File upload support (`multipart/form-data`) `P1`
+- [x] **M4-04** · JSON-path response extraction (`response_path = "$.data.items"`) `P2`
+- [x] **M4-05** · Config reload on `SIGHUP` without restart `P2`
+- [x] **M4-06** · OpenAPI extensions: `x-rest-mcp-name`, `x-rest-mcp-hidden` `P2`
+- [x] **M4-07** · Per-endpoint header overrides `P2`
+- [x] **M4-08** · Request retry with exponential backoff (configurable) `P2`
+- [x] **M4-09** · Response caching (ETag / Last-Modified aware) `P2`
+- [x] **M4-10** · MCP resources — expose spec summary as a resource `P2`
 
 ---
 
 ## Design Decisions (needs RFC)
 
-- [ ] **D-01** · Tool naming collision strategy — append version prefix? numeric suffix? `design`
+- [x] **D-01** · Tool naming collision strategy — append numeric suffix (`_2`, `_3`, ...) `design`
 - [ ] **D-02** · Nested request body handling — flatten depth limit? always raw JSON for depth > 1? `design`
 - [ ] **D-03** · Pagination — expose params only, or optional auto-paginate for common patterns? `design`
-- [ ] **D-04** · Binary name — `rest-mcp` vs `restmcp` vs `mcp-rest` `design`
+- [x] **D-04** · Binary name — `rest-mcp` ✓ `design`
 - [ ] **D-05** · `headers` in MCP client config — how to pass to the binary (env? CLI? stdin handshake?) `design`
 
 ---
